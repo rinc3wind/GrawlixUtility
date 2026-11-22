@@ -1,0 +1,6 @@
+bin/
+obj/
+.appdata/
+.localappdata/
+.dotnet/
+NuGet/

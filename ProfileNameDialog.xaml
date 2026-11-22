@@ -1,0 +1,17 @@
+<Window x:Class="PersistentWindows.ProfileNameDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Profile name" Width="360" Height="190" MinWidth="360" MinHeight="190" MaxWidth="360" MaxHeight="190"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{StaticResource Canvas}" Foreground="{StaticResource TextMain}">
+  <Grid Margin="22">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="10"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <TextBlock Text="Profile name" FontSize="13" FontWeight="SemiBold" />
+    <TextBox x:Name="NameInput" Grid.Row="2" VerticalContentAlignment="Center" />
+    <TextBlock x:Name="ErrorText" Grid.Row="3" Text="Enter a profile name." Foreground="#FF8D8D" FontSize="11" VerticalAlignment="Top" Margin="0,5,0,0" Visibility="Collapsed" />
+    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button Content="Cancel" IsCancel="True" MinWidth="84" Margin="0,0,8,0" />
+      <Button Content="OK" IsDefault="True" MinWidth="84" Background="#3977D5" BorderBrush="#3977D5" Click="Accept_Click" />
+    </StackPanel>
+  </Grid>
+</Window>
