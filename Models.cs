@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Net.Http;
 using System.Windows.Threading;
+using Application = System.Windows.Application;
 
 namespace GrawlixUtility;
 
@@ -235,6 +236,7 @@ public sealed class AppSettings
     public List<WebAppEntry> WebApps { get; set; } = [];
     public bool StartAutomaticallyOnWindowsBoot { get; set; }
     public bool StartMicrophoneToggleAutomatically { get; set; } = true;
+    public bool MinimizeToTrayOnExit { get; set; }
 }
 
 public static class SettingsStore

@@ -7,6 +7,14 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using DragEventArgs = System.Windows.DragEventArgs;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using IDataObject = System.Windows.IDataObject;
+using Brush = System.Windows.Media.Brush;
+using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
+using Button = System.Windows.Controls.Button;
+using DragDropEffects = System.Windows.DragDropEffects;
+using DataFormats = System.Windows.DataFormats;
 
 namespace GrawlixUtility;
 
@@ -16,11 +24,23 @@ public partial class MainWindow : Window
     private Profile? _activeProfile;
     private bool _loadingProfiles;
     private bool _initializingStartupSettings = true;
+    private bool _exitingFromTray;
+    private readonly System.Windows.Forms.NotifyIcon _trayIcon;
     private readonly DispatcherTimer _micToggleStatusTimer;
 
     public MainWindow()
     {
         InitializeComponent();
+        _trayIcon = new System.Windows.Forms.NotifyIcon
+        {
+            Text = "Grawlix Utility",
+            Icon = System.Drawing.SystemIcons.Application,
+            Visible = true,
+            ContextMenuStrip = new System.Windows.Forms.ContextMenuStrip()
+        };
+        _trayIcon.DoubleClick += (_, _) => RestoreFromTray();
+        _trayIcon.ContextMenuStrip.Items.Add("Open Grawlix Utility", null, (_, _) => RestoreFromTray());
+        _trayIcon.ContextMenuStrip.Items.Add("Exit", null, (_, _) => { _exitingFromTray = true; Close(); });
         _settings = SettingsStore.Load();
         RestoreMainWindowBounds();
         Closing += MainWindow_Closing;
@@ -33,6 +53,7 @@ public partial class MainWindow : Window
         _micToggleStatusTimer.Start();
         StartWithWindowsCheckBox.IsChecked = _settings.StartAutomaticallyOnWindowsBoot;
         StartMicrophoneToggleCheckBox.IsChecked = _settings.StartMicrophoneToggleAutomatically;
+        MinimizeToTrayCheckBox.IsChecked = _settings.MinimizeToTrayOnExit;
         _initializingStartupSettings = false;
         try { SyncWindowsStartupRegistration(_settings.StartAutomaticallyOnWindowsBoot); }
         catch (Exception ex) { StartupSettingsStatus.Text = $"Could not update startup setting: {ex.Message}"; }
@@ -59,7 +80,17 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        if (_settings.MinimizeToTrayOnExit && !_exitingFromTray)
+        {
+            e.Cancel = true;
+            Hide();
+            try { SettingsStore.Save(_settings); } catch { }
+            return;
+        }
+
         _micToggleStatusTimer.Stop();
+        _trayIcon.Visible = false;
+        _trayIcon.Dispose();
         var normalBounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         _settings.MainWindowBounds = new WindowRect
         {
@@ -71,6 +102,21 @@ public partial class MainWindow : Window
         };
         try { SettingsStore.Save(_settings); }
         catch { }
+    }
+
+    private void RestoreFromTray()
+    {
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private void TabHeaderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var element = sender as DependencyObject;
+        while (element is not null && element is not TabItem)
+            element = VisualTreeHelper.GetParent(element);
+        if (element is TabItem tabItem) tabItem.IsSelected = true;
     }
 
     private static Process[] GetMicToggleProcesses() => Process.GetProcessesByName("MicToggle");
@@ -156,6 +202,20 @@ public partial class MainWindow : Window
         {
             StartupSettingsStatus.Text = $"Could not save setting: {ex.Message}";
         }
+    }
+
+    private void MinimizeToTray_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializingStartupSettings) return;
+        _settings.MinimizeToTrayOnExit = MinimizeToTrayCheckBox.IsChecked == true;
+        try
+        {
+            SettingsStore.Save(_settings);
+            StartupSettingsStatus.Text = _settings.MinimizeToTrayOnExit
+                ? "Closing the window will keep Grawlix Utility running in the system tray."
+                : "Closing the window will exit Grawlix Utility.";
+        }
+        catch (Exception ex) { StartupSettingsStatus.Text = $"Could not save setting: {ex.Message}"; }
     }
 
     private static void SyncWindowsStartupRegistration(bool enabled)

@@ -5,6 +5,59 @@
         Background="{StaticResource Canvas}" Foreground="{StaticResource TextMain}"
         AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop">
   <Window.Resources>
+    <Style TargetType="TabControl">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabControl">
+            <Grid KeyboardNavigation.TabNavigation="Local">
+              <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+              <TabPanel Grid.Row="0" IsItemsHost="True" Background="Transparent" />
+              <ContentPresenter Grid.Row="1" ContentSource="SelectedContent" SnapsToDevicePixels="True" />
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="TabHeaderButtonStyle" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="14,9" />
+      <Setter Property="Margin" Value="0,0,6,10" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=TabItem}}" Value="True">
+          <Setter Property="Background" Value="{StaticResource PanelRaised}" />
+          <Setter Property="Foreground" Value="{StaticResource TextMain}" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=TabItem}}" Value="True">
+          <Setter Property="Background" Value="#28364A" />
+          <Setter Property="Foreground" Value="{StaticResource Accent}" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+    <Style TargetType="TabItem">
+      <Setter Property="Foreground" Value="{StaticResource TextMain}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabItem">
+            <ContentPresenter ContentSource="Header" />
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style x:Key="AppListItemStyle" TargetType="ListBoxItem">
       <Setter Property="Padding" Value="12,10"/><Setter Property="Margin" Value="0,2"/><Setter Property="Background" Value="Transparent"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
@@ -14,7 +67,7 @@
     </Style>
   </Window.Resources>
   <TabControl Margin="30" SelectedIndex="0">
-    <TabItem Header="Layouts">
+    <TabItem><TabItem.Header><Button Content="Layouts" Style="{StaticResource TabHeaderButtonStyle}" Click="TabHeaderButton_Click" /></TabItem.Header>
       <Grid>
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="20"/><RowDefinition Height="*"/><RowDefinition Height="20"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="12" Padding="16">
@@ -59,7 +112,7 @@
     </Grid>
       </Grid>
     </TabItem>
-    <TabItem Header="Web2App">
+    <TabItem><TabItem.Header><Button Content="Web2App" Style="{StaticResource TabHeaderButtonStyle}" Click="TabHeaderButton_Click" /></TabItem.Header>
       <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="20"/><RowDefinition Height="*"/><RowDefinition Height="20"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="12" Padding="16">
@@ -94,7 +147,7 @@
         <StackPanel Grid.Row="4" Orientation="Horizontal" VerticalAlignment="Center"><Ellipse Width="7" Height="7" Fill="{StaticResource Accent}" Margin="0,0,8,0"/><TextBlock x:Name="WebStatusText" Text="Ready" Foreground="{StaticResource TextMuted}" FontSize="12" VerticalAlignment="Center"/></StackPanel>
       </Grid>
     </TabItem>
-    <TabItem Header="Microphone">
+    <TabItem><TabItem.Header><Button Content="Microphone" Style="{StaticResource TabHeaderButtonStyle}" Click="TabHeaderButton_Click" /></TabItem.Header>
       <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="20"/><RowDefinition Height="*"/><RowDefinition Height="20"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="12" Padding="18">
@@ -120,7 +173,7 @@
       </Grid>
     </TabItem>
     <TabItem ToolTip="Settings" AutomationProperties.Name="Settings">
-      <TabItem.Header><TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="16" /></TabItem.Header>
+      <TabItem.Header><Button Style="{StaticResource TabHeaderButtonStyle}" ToolTip="Settings" Click="TabHeaderButton_Click"><TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="16" /></Button></TabItem.Header>
       <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="20"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <StackPanel>
@@ -133,6 +186,8 @@
             <TextBlock Text="Grawlix Utility will open when you sign in to Windows." Foreground="{StaticResource TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="24,6,0,12" />
             <CheckBox x:Name="StartMicrophoneToggleCheckBox" Content="Start Microphone Toggle automatically" Checked="StartMicrophoneToggle_Changed" Unchecked="StartMicrophoneToggle_Changed" />
             <TextBlock Text="When enabled, MicToggle starts whenever Grawlix Utility opens." Foreground="{StaticResource TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="24,6,0,0" />
+            <CheckBox x:Name="MinimizeToTrayCheckBox" Content="Minimize to tray on exit" Margin="0,12,0,0" Checked="MinimizeToTray_Changed" Unchecked="MinimizeToTray_Changed" />
+            <TextBlock Text="Closing the window keeps Grawlix Utility running in the system tray." Foreground="{StaticResource TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="24,6,0,0" />
             <TextBlock x:Name="StartupSettingsStatus" Text="" Foreground="{StaticResource TextMuted}" FontSize="12" Margin="24,10,0,0" />
           </StackPanel>
         </Border>
