@@ -10,7 +10,7 @@ using System.Windows.Media.Imaging;
 using System.Net.Http;
 using System.Windows.Threading;
 
-namespace PersistentWindows;
+namespace GrawlixUtility;
 
 public sealed class WindowRect
 {
@@ -65,8 +65,8 @@ public sealed class ExecutableEntry
 public sealed class WebAppEntry : System.ComponentModel.INotifyPropertyChanged
 {
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
-    private static readonly string IconCacheDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersistentWindows", "favicon-cache");
-    private static readonly string TitleCacheDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersistentWindows", "title-cache");
+    private static readonly string IconCacheDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GrawlixUtility", "favicon-cache");
+    private static readonly string TitleCacheDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GrawlixUtility", "title-cache");
     private ImageSource? _icon;
     private bool _iconLoaded;
     private string? _pageTitle;
@@ -233,11 +233,15 @@ public sealed class AppSettings
     public List<Profile> Profiles { get; set; } = [new Profile()];
     public string ChromePath { get; set; } = "";
     public List<WebAppEntry> WebApps { get; set; } = [];
+    public bool StartAutomaticallyOnWindowsBoot { get; set; }
+    public bool StartMicrophoneToggleAutomatically { get; set; } = true;
 }
 
 public static class SettingsStore
 {
-    private static readonly string FilePath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersistentWindows", "profiles.json");
+    private static readonly string SettingsDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GrawlixUtility");
+    private static readonly string FilePath = System.IO.Path.Combine(SettingsDirectory, "profiles.json");
+    private static readonly string LegacyFilePath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersistentWindows", "profiles.json");
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -248,10 +252,19 @@ public static class SettingsStore
     {
         try
         {
-            if (File.Exists(FilePath))
+            var settingsPath = File.Exists(FilePath) ? FilePath : LegacyFilePath;
+            if (File.Exists(settingsPath))
             {
-                var data = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), JsonOptions);
-                if (data?.Profiles is { Count: > 0 }) return data;
+                var data = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(settingsPath), JsonOptions);
+                if (data?.Profiles is { Count: > 0 })
+                {
+                    if (settingsPath == LegacyFilePath)
+                    {
+                        try { Save(data); }
+                        catch { }
+                    }
+                    return data;
+                }
             }
         }
         catch { }
@@ -260,7 +273,7 @@ public static class SettingsStore
 
     public static void Save(AppSettings settings)
     {
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(FilePath)!);
+        Directory.CreateDirectory(SettingsDirectory);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(settings, JsonOptions));
     }
 }

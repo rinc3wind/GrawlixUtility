@@ -5,7 +5,10 @@
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>PersistentWindows</AssemblyName>
-    <RootNamespace>PersistentWindows</RootNamespace>
+    <AssemblyName>GrawlixUtility</AssemblyName>
+    <RootNamespace>GrawlixUtility</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <None Update="MicToggle.exe" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

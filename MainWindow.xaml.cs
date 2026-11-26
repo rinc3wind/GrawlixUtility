@@ -6,14 +6,17 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 
-namespace PersistentWindows;
+namespace GrawlixUtility;
 
 public partial class MainWindow : Window
 {
     private readonly AppSettings _settings;
     private Profile? _activeProfile;
     private bool _loadingProfiles;
+    private bool _initializingStartupSettings = true;
+    private readonly DispatcherTimer _micToggleStatusTimer;
 
     public MainWindow()
     {
@@ -25,6 +28,16 @@ public partial class MainWindow : Window
         ProfileCombo.SelectedItem = _settings.Profiles.FirstOrDefault(p => p.Name == _settings.SelectedProfile) ?? _settings.Profiles[0];
         RefreshList();
         RefreshWebApps();
+        _micToggleStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _micToggleStatusTimer.Tick += (_, _) => RefreshMicToggleStatus();
+        _micToggleStatusTimer.Start();
+        StartWithWindowsCheckBox.IsChecked = _settings.StartAutomaticallyOnWindowsBoot;
+        StartMicrophoneToggleCheckBox.IsChecked = _settings.StartMicrophoneToggleAutomatically;
+        _initializingStartupSettings = false;
+        try { SyncWindowsStartupRegistration(_settings.StartAutomaticallyOnWindowsBoot); }
+        catch (Exception ex) { StartupSettingsStatus.Text = $"Could not update startup setting: {ex.Message}"; }
+        RefreshMicToggleStatus();
+        if (_settings.StartMicrophoneToggleAutomatically) StartMicToggle();
     }
 
     private void RestoreMainWindowBounds()
@@ -46,6 +59,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        _micToggleStatusTimer.Stop();
         var normalBounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         _settings.MainWindowBounds = new WindowRect
         {
@@ -57,6 +71,126 @@ public partial class MainWindow : Window
         };
         try { SettingsStore.Save(_settings); }
         catch { }
+    }
+
+    private static Process[] GetMicToggleProcesses() => Process.GetProcessesByName("MicToggle");
+
+    private void RefreshMicToggleStatus()
+    {
+        var processes = GetMicToggleProcesses();
+        var running = processes.Length > 0;
+        foreach (var process in processes) process.Dispose();
+
+        MicStatusText.Text = running ? "MicToggle is running" : "MicToggle is stopped";
+        MicStatusDot.Fill = (Brush)FindResource(running ? "Accent" : "TextMuted");
+        StartMicToggleButton.IsEnabled = !running;
+        StopMicToggleButton.IsEnabled = running;
+        MicStatusDetailText.Text = running
+            ? "Press Scroll Lock to toggle the microphone, or double-click the MicToggle tray icon."
+            : "Start MicToggle to enable the global Scroll Lock microphone toggle.";
+    }
+
+    private void StartMicToggle_Click(object sender, RoutedEventArgs e)
+    {
+        StartMicToggle();
+    }
+
+    private void StartMicToggle()
+    {
+        var runningProcesses = GetMicToggleProcesses();
+        var alreadyRunning = runningProcesses.Length > 0;
+        foreach (var process in runningProcesses) process.Dispose();
+        if (alreadyRunning) return;
+        var executablePath = Path.Combine(AppContext.BaseDirectory, "MicToggle.exe");
+        if (!File.Exists(executablePath))
+        {
+            MicStatusDetailText.Text = $"MicToggle.exe was not found at {executablePath}";
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(executablePath) { UseShellExecute = true });
+            MicStatusDetailText.Text = "Starting MicToggle…";
+            _ = Dispatcher.InvokeAsync(async () =>
+            {
+                await Task.Delay(300);
+                RefreshMicToggleStatus();
+            });
+        }
+        catch (Exception ex)
+        {
+            MicStatusDetailText.Text = $"Could not start MicToggle: {ex.Message}";
+        }
+    }
+
+    private void StartWithWindows_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializingStartupSettings) return;
+        var enabled = StartWithWindowsCheckBox.IsChecked == true;
+        _settings.StartAutomaticallyOnWindowsBoot = enabled;
+        try
+        {
+            SyncWindowsStartupRegistration(enabled);
+            SettingsStore.Save(_settings);
+            StartupSettingsStatus.Text = enabled ? "Startup registration enabled." : "Startup registration disabled.";
+        }
+        catch (Exception ex)
+        {
+            StartupSettingsStatus.Text = $"Could not update startup setting: {ex.Message}";
+        }
+    }
+
+    private void StartMicrophoneToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializingStartupSettings) return;
+        _settings.StartMicrophoneToggleAutomatically = StartMicrophoneToggleCheckBox.IsChecked == true;
+        try
+        {
+            SettingsStore.Save(_settings);
+            StartupSettingsStatus.Text = _settings.StartMicrophoneToggleAutomatically
+                ? "Microphone Toggle will start whenever Grawlix Utility opens."
+                : "Microphone Toggle will only start when you choose Start MicToggle.";
+        }
+        catch (Exception ex)
+        {
+            StartupSettingsStatus.Text = $"Could not save setting: {ex.Message}";
+        }
+    }
+
+    private static void SyncWindowsStartupRegistration(bool enabled)
+    {
+        using var runKey = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        if (runKey is null) throw new InvalidOperationException("Could not access the current user's startup settings.");
+
+        if (enabled)
+        {
+            var executablePath = Environment.ProcessPath
+                ?? throw new InvalidOperationException("Could not determine the application executable path.");
+            runKey.SetValue("GrawlixUtility", $"\"{executablePath}\"");
+        }
+        else
+        {
+            runKey.DeleteValue("GrawlixUtility", throwOnMissingValue: false);
+        }
+        runKey.DeleteValue("PersistentWindows", throwOnMissingValue: false);
+    }
+
+    private void StopMicToggle_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var process in GetMicToggleProcesses())
+        {
+            try { process.Kill(); }
+            catch (Exception ex) { MicStatusDetailText.Text = $"Could not stop MicToggle: {ex.Message}"; }
+            finally { process.Dispose(); }
+        }
+        RefreshMicToggleStatus();
+    }
+
+    private void OpenSoundSettings_Click(object sender, RoutedEventArgs e)
+    {
+        try { Process.Start(new ProcessStartInfo("mmsys.cpl") { UseShellExecute = true }); }
+        catch (Exception ex) { MicStatusDetailText.Text = $"Could not open Sound settings: {ex.Message}"; }
     }
 
     private void ProfileCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)

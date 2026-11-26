@@ -1,5 +1,5 @@
 using System.Windows;
 
-namespace PersistentWindows;
+namespace GrawlixUtility;
 
 public partial class App : Application { }

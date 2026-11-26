@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace PersistentWindows;
+namespace GrawlixUtility;
 
 internal static class WindowManager
 {

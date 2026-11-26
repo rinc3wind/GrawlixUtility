@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace PersistentWindows;
+namespace GrawlixUtility;
 
 public partial class ProfileNameDialog : Window
 {

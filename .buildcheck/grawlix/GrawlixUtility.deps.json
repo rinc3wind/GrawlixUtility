@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v11.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v11.0": {
+      "GrawlixUtility/1.0.0": {
+        "runtime": {
+          "GrawlixUtility.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "GrawlixUtility/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
