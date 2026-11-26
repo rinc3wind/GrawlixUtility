@@ -34,7 +34,7 @@ public partial class MainWindow : Window
         _trayIcon = new System.Windows.Forms.NotifyIcon
         {
             Text = "Grawlix Utility",
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = new System.Drawing.Icon(Path.Combine(AppContext.BaseDirectory, "favicon.ico")),
             Visible = true,
             ContextMenuStrip = new System.Windows.Forms.ContextMenuStrip()
         };

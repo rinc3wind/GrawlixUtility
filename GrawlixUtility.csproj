@@ -8,8 +8,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>GrawlixUtility</AssemblyName>
     <RootNamespace>GrawlixUtility</RootNamespace>
+    <ApplicationIcon>favicon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <None Update="MicToggle.exe" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="favicon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="favicon.ico" />
   </ItemGroup>
 </Project>
