@@ -4,7 +4,7 @@ A native Windows desktop app for saving executable lists and restoring their win
 
 ## Run
 
-Requires the .NET 8 SDK and Windows Desktop runtime.
+Requires the .NET 11 SDK and Windows Desktop runtime.
 
 ```powershell
 dotnet run

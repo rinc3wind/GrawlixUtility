@@ -7,6 +7,8 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Net.Http;
+using System.Windows.Threading;
 
 namespace PersistentWindows;
 
@@ -36,13 +38,12 @@ public sealed class ExecutableEntry
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr handle);
     private const uint ShgfiIcon = 0x100;
 
-    private ImageSource? _icon;
     public string Path { get; set; } = "";
     public List<WindowRect> Windows { get; set; } = [];
     public string Name => System.IO.Path.GetFileNameWithoutExtension(Path);
 
     [JsonIgnore]
-    public ImageSource? Icon => _icon ??= LoadIcon();
+    public ImageSource? Icon => field ??= LoadIcon();
 
     private ImageSource? LoadIcon()
     {
@@ -61,6 +62,164 @@ public sealed class ExecutableEntry
     }
 }
 
+public sealed class WebAppEntry : System.ComponentModel.INotifyPropertyChanged
+{
+    private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
+    private static readonly string IconCacheDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersistentWindows", "favicon-cache");
+    private static readonly string TitleCacheDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersistentWindows", "title-cache");
+    private ImageSource? _icon;
+    private bool _iconLoaded;
+    private string? _pageTitle;
+    private bool _titleLoaded;
+
+    public string Url { get; set; } = "";
+
+    [JsonIgnore]
+    public ImageSource? Icon
+    {
+        get
+        {
+            if (_iconLoaded) return _icon;
+            _iconLoaded = true;
+            _icon = LoadCachedIcon();
+            if (_icon is null) _ = LoadIconAsync();
+            return _icon;
+        }
+    }
+
+    [JsonIgnore]
+    public string DisplayTitle
+    {
+        get
+        {
+            if (!_titleLoaded)
+            {
+                _titleLoaded = true;
+                _pageTitle = LoadCachedTitle();
+                if (_pageTitle is null) _ = LoadPageTitleAsync();
+            }
+            return string.IsNullOrWhiteSpace(_pageTitle) ? GetFallbackTitle() : _pageTitle;
+        }
+    }
+
+    private ImageSource? LoadCachedIcon()
+    {
+        try
+        {
+            var path = GetIconCachePath();
+            if (!File.Exists(path)) return null;
+            using var stream = File.OpenRead(path);
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.StreamSource = stream;
+            image.DecodePixelWidth = 32;
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch { return null; }
+    }
+
+    private async Task LoadIconAsync()
+    {
+        if (!Uri.TryCreate(Url, UriKind.Absolute, out var pageUri)) return;
+        try
+        {
+            var candidates = new[]
+            {
+                new Uri(pageUri, "/favicon.ico"),
+                new Uri(pageUri, "/favicon.png")
+            };
+            foreach (var iconUri in candidates)
+            {
+                try
+                {
+                    using var response = await HttpClient.GetAsync(iconUri, HttpCompletionOption.ResponseHeadersRead);
+                    if (!response.IsSuccessStatusCode) continue;
+                    var bytes = await response.Content.ReadAsByteArrayAsync();
+                    using var stream = new MemoryStream(bytes);
+                    var image = new BitmapImage();
+                    image.BeginInit();
+                    image.CacheOption = BitmapCacheOption.OnLoad;
+                    image.StreamSource = stream;
+                    image.DecodePixelWidth = 32;
+                    image.EndInit();
+                    image.Freeze();
+                    Directory.CreateDirectory(IconCacheDirectory);
+                    await File.WriteAllBytesAsync(GetIconCachePath(), bytes);
+                    _icon = image;
+                    var dispatcher = Application.Current?.Dispatcher;
+                    if (dispatcher is not null && !dispatcher.CheckAccess())
+                        await dispatcher.InvokeAsync(() => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Icon))));
+                    else
+                        PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Icon)));
+                    return;
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private string GetIconCachePath()
+    {
+        var hostKey = Uri.TryCreate(Url, UriKind.Absolute, out var uri) ? uri.Host : Url;
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(hostKey.ToLowerInvariant())));
+        return System.IO.Path.Combine(IconCacheDirectory, hash + ".img");
+    }
+
+    private string GetFallbackTitle()
+    {
+        if (!Uri.TryCreate(Url, UriKind.Absolute, out var uri)) return Url;
+        var path = uri.AbsolutePath.Trim('/');
+        return string.IsNullOrEmpty(path) ? uri.Host : $"{uri.Host}/{path}";
+    }
+
+    private string GetTitleCachePath()
+    {
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Url)));
+        return System.IO.Path.Combine(TitleCacheDirectory, hash + ".txt");
+    }
+
+    private string? LoadCachedTitle()
+    {
+        try
+        {
+            var path = GetTitleCachePath();
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
+        catch { return null; }
+    }
+
+    private async Task LoadPageTitleAsync()
+    {
+        if (!Uri.TryCreate(Url, UriKind.Absolute, out var uri)) return;
+        try
+        {
+            using var response = await HttpClient.GetAsync(uri);
+            response.EnsureSuccessStatusCode();
+            var html = await response.Content.ReadAsStringAsync();
+            var match = System.Text.RegularExpressions.Regex.Match(html, "<title\\b[^>]*>(.*?)</title\\s*>", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            if (!match.Success) return;
+            var title = System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(match.Groups[1].Value, "<[^>]+>", " "));
+            title = System.Text.RegularExpressions.Regex.Replace(title, "\\s+", " ").Trim();
+            if (string.IsNullOrWhiteSpace(title)) return;
+            _pageTitle = title;
+            Directory.CreateDirectory(TitleCacheDirectory);
+            await File.WriteAllTextAsync(GetTitleCachePath(), title);
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher is not null && !dispatcher.CheckAccess())
+                await dispatcher.InvokeAsync(() => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(DisplayTitle))));
+            else
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(DisplayTitle)));
+        }
+        catch { }
+    }
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+}
+
 public sealed class Profile
 {
     public string Name { get; set; } = "Default";
@@ -72,12 +231,18 @@ public sealed class AppSettings
     public string SelectedProfile { get; set; } = "Default";
     public WindowRect? MainWindowBounds { get; set; }
     public List<Profile> Profiles { get; set; } = [new Profile()];
+    public string ChromePath { get; set; } = "";
+    public List<WebAppEntry> WebApps { get; set; } = [];
 }
 
 public static class SettingsStore
 {
     private static readonly string FilePath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersistentWindows", "profiles.json");
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        RespectNullableAnnotations = true
+    };
 
     public static AppSettings Load()
     {
@@ -85,7 +250,7 @@ public static class SettingsStore
         {
             if (File.Exists(FilePath))
             {
-                var data = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath));
+                var data = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), JsonOptions);
                 if (data?.Profiles is { Count: > 0 }) return data;
             }
         }

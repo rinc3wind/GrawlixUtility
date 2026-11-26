@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace PersistentWindows;
@@ -23,6 +24,7 @@ public partial class MainWindow : Window
         ProfileCombo.ItemsSource = _settings.Profiles;
         ProfileCombo.SelectedItem = _settings.Profiles.FirstOrDefault(p => p.Name == _settings.SelectedProfile) ?? _settings.Profiles[0];
         RefreshList();
+        RefreshWebApps();
     }
 
     private void RestoreMainWindowBounds()
@@ -251,5 +253,185 @@ public partial class MainWindow : Window
     {
         if (e.Data.GetDataPresent(DataFormats.FileDrop)) AddPaths((string[])e.Data.GetData(DataFormats.FileDrop)!);
         e.Handled = true;
+    }
+
+    private void RefreshWebApps()
+    {
+        var hasChrome = !string.IsNullOrWhiteSpace(_settings.ChromePath);
+        ChromePathText.Text = hasChrome ? _settings.ChromePath : "No Chrome executable selected";
+        ChromePathText.Foreground = (Brush)FindResource(hasChrome ? "TextMain" : "TextMuted");
+
+        WebAppsList.ItemsSource = null;
+        WebAppsList.ItemsSource = _settings.WebApps;
+        WebEmptyHint.Visibility = _settings.WebApps.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void SetWebStatus(string message) => WebStatusText.Text = message;
+
+    private void PersistWeb(string statusMessage = "Saved")
+    {
+        try { SettingsStore.Save(_settings); SetWebStatus(statusMessage); }
+        catch (Exception ex) { SetWebStatus($"Could not save settings: {ex.Message}"); }
+    }
+
+    private void SelectChrome_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select Google Chrome executable",
+            Filter = "Executables (*.exe)|*.exe|All files (*.*)|*.*"
+        };
+
+        var currentDirectory = !string.IsNullOrWhiteSpace(_settings.ChromePath) ? Path.GetDirectoryName(_settings.ChromePath) : null;
+        if (!string.IsNullOrEmpty(currentDirectory) && Directory.Exists(currentDirectory))
+        {
+            dialog.InitialDirectory = currentDirectory;
+        }
+        else
+        {
+            var defaultChromeDirectory = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Google", "Chrome", "Application"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Google", "Chrome", "Application"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Google", "Chrome", "Application")
+            }.FirstOrDefault(Directory.Exists);
+            if (defaultChromeDirectory is not null) dialog.InitialDirectory = defaultChromeDirectory;
+        }
+
+        if (dialog.ShowDialog(this) != true) return;
+        _settings.ChromePath = Path.GetFullPath(dialog.FileName);
+        RefreshWebApps();
+        PersistWeb($"Chrome set to {Path.GetFileName(_settings.ChromePath)}");
+    }
+
+    private void WebLinkInput_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        e.Handled = true;
+        AddWebLinkFromInput();
+    }
+
+    private void AddWebLink_Click(object sender, RoutedEventArgs e) => AddWebLinkFromInput();
+
+    private void AddWebLinkFromInput()
+    {
+        if (AddWebLinks([WebLinkInput.Text]) > 0) WebLinkInput.Clear();
+    }
+
+    private int AddWebLinks(IEnumerable<string> rawLinks)
+    {
+        var added = 0;
+        var invalid = false;
+        foreach (var raw in rawLinks)
+        {
+            if (!TryNormalizeWebUrl(raw, out var url))
+            {
+                if (!string.IsNullOrWhiteSpace(raw)) invalid = true;
+                continue;
+            }
+            if (_settings.WebApps.Any(w => w.Url.Equals(url, StringComparison.OrdinalIgnoreCase))) continue;
+            _settings.WebApps.Add(new WebAppEntry { Url = url });
+            added++;
+        }
+
+        RefreshWebApps();
+        if (added > 0) PersistWeb($"Added {added} webpage link{(added == 1 ? "" : "s")}");
+        else if (invalid) SetWebStatus("Enter a valid http or https webpage link");
+        else SetWebStatus("No new webpage links were added");
+        return added;
+    }
+
+    private void RemoveWebLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: WebAppEntry entry }) return;
+        _settings.WebApps.Remove(entry);
+        RefreshWebApps();
+        PersistWeb($"Removed {entry.DisplayTitle}");
+    }
+
+    private void RunWebLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: WebAppEntry entry }) return;
+        if (string.IsNullOrWhiteSpace(_settings.ChromePath) || !File.Exists(_settings.ChromePath))
+        {
+            SetWebStatus("Select your Google Chrome executable first");
+            return;
+        }
+
+        try
+        {
+            var startInfo = new ProcessStartInfo(_settings.ChromePath)
+            {
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(_settings.ChromePath) ?? ""
+            };
+            startInfo.ArgumentList.Add($"--app={entry.Url}");
+            Process.Start(startInfo)?.Dispose();
+            SetWebStatus($"Opened {entry.DisplayTitle} in Chrome");
+        }
+        catch (Exception ex)
+        {
+            SetWebStatus($"Could not launch Chrome: {ex.Message}");
+        }
+    }
+
+    private void WebAppsList_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = ExtractDroppedWebLinks(e.Data).Any() ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void WebAppsList_Drop(object sender, DragEventArgs e)
+    {
+        AddWebLinks(ExtractDroppedWebLinks(e.Data));
+        e.Handled = true;
+    }
+
+    private static IEnumerable<string> ExtractDroppedWebLinks(IDataObject data)
+    {
+        if (data.GetDataPresent(DataFormats.FileDrop) && data.GetData(DataFormats.FileDrop) is string[] files)
+        {
+            foreach (var file in files)
+            {
+                if (!Path.GetExtension(file).Equals(".url", StringComparison.OrdinalIgnoreCase) || !File.Exists(file)) continue;
+                string? url = null;
+                try
+                {
+                    foreach (var line in File.ReadLines(file))
+                    {
+                        if (line.StartsWith("URL=", StringComparison.OrdinalIgnoreCase))
+                        {
+                            url = line[4..].Trim();
+                            break;
+                        }
+                    }
+                }
+                catch { }
+                if (!string.IsNullOrWhiteSpace(url)) yield return url;
+            }
+            yield break;
+        }
+
+        var text = data.GetDataPresent(DataFormats.UnicodeText)
+            ? data.GetData(DataFormats.UnicodeText) as string
+            : data.GetDataPresent(DataFormats.Text)
+                ? data.GetData(DataFormats.Text) as string
+                : null;
+        if (string.IsNullOrWhiteSpace(text)) yield break;
+
+        foreach (var line in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            yield return line;
+    }
+
+    private static bool TryNormalizeWebUrl(string raw, out string normalized)
+    {
+        normalized = "";
+        var trimmed = raw.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed)) return false;
+        var candidate = trimmed.Contains("://", StringComparison.Ordinal) ? trimmed : $"https://{trimmed}";
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme is not ("http" or "https") || string.IsNullOrWhiteSpace(uri.Host)) return false;
+        normalized = uri.AbsoluteUri;
+        return true;
     }
 }

@@ -40,6 +40,17 @@ internal static class WindowManager
     [DllImport("user32.dll")] private static extern bool SetWindowPlacement(IntPtr hwnd, ref WindowPlacement placement);
 
     private sealed record FoundWindow(IntPtr Handle, string Path, string Title, WindowRect Rect);
+    private sealed record AppWindowsRestored(List<string> WindowSummaries);
+    private sealed record AppLaunchedWithoutLayout(string AppName);
+    private sealed record AppAlreadyOpenWithoutLayout(string AppName);
+    private sealed record AppWindowsNotFound(ExecutableEntry App);
+    private sealed record AppPositioningFailed(string AppName);
+    private union AppRestoreOutcome(
+        AppWindowsRestored,
+        AppLaunchedWithoutLayout,
+        AppAlreadyOpenWithoutLayout,
+        AppWindowsNotFound,
+        AppPositioningFailed);
 
     public static async Task CloseAllOtherWindowsAsync(uint currentProcessId, Action<string> status)
     {
@@ -142,10 +153,7 @@ internal static class WindowManager
             return;
         }
 
-        var launchedWithoutLayout = new List<string>();
-        var windowsNotFound = new List<string>();
-        var positioningFailed = new List<string>();
-        var restoredWindows = new List<string>();
+        var outcomes = new List<AppRestoreOutcome>(profile.Applications.Count);
         foreach (var app in profile.Applications)
         {
             var hasSavedLayout = app.Windows.Count > 0;
@@ -156,7 +164,11 @@ internal static class WindowManager
             var beforeHandles = beforeLaunch.Select(w => w.Handle).ToHashSet();
             var existing = FindMatchingWindows(app.Path, expectedPaths, requireNamedScriptWindow: isScript);
 
-            if (!hasSavedLayout && existing.Count > 0) continue;
+            if (!hasSavedLayout && existing.Count > 0)
+            {
+                outcomes.Add(new AppAlreadyOpenWithoutLayout(app.Name));
+                continue;
+            }
 
             var targetCount = hasSavedLayout ? app.Windows.Count : 1;
             for (var i = existing.Count; i < targetCount; i++)
@@ -184,12 +196,12 @@ internal static class WindowManager
 
             if (!hasSavedLayout)
             {
-                if (existing.Count == 0) windowsNotFound.Add(app.Name);
-                else launchedWithoutLayout.Add(app.Name);
+                outcomes.Add(existing.Count == 0 ? new AppWindowsNotFound(app) : new AppLaunchedWithoutLayout(app.Name));
                 continue;
             }
 
-            if (existing.Count < targetCount) windowsNotFound.Add(app.Name);
+            var positioningFailed = false;
+            var restoredWindows = new List<string>();
             for (var i = 0; i < Math.Min(existing.Count, app.Windows.Count); i++)
             {
                 var rect = app.Windows[i];
@@ -201,35 +213,70 @@ internal static class WindowManager
                         ShowCommand = SwMaximize,
                         NormalPosition = new Rect { Left = rect.X, Top = rect.Y, Right = rect.X + Math.Max(100, rect.Width), Bottom = rect.Y + Math.Max(80, rect.Height) }
                     };
-                    if (!SetWindowPlacement(existing[i].Handle, ref placement)) positioningFailed.Add(app.Name);
+                    if (!SetWindowPlacement(existing[i].Handle, ref placement)) positioningFailed = true;
                 }
                 else
                 {
                     ShowWindow(existing[i].Handle, SwRestore);
-                    if (!SetWindowPos(existing[i].Handle, IntPtr.Zero, rect.X, rect.Y, Math.Max(100, rect.Width), Math.Max(80, rect.Height), SwpNoZOrder | SwpNoActivate | SwpShowWindow)) positioningFailed.Add(app.Name);
+                    if (!SetWindowPos(existing[i].Handle, IntPtr.Zero, rect.X, rect.Y, Math.Max(100, rect.Width), Math.Max(80, rect.Height), SwpNoZOrder | SwpNoActivate | SwpShowWindow)) positioningFailed = true;
                 }
                 await Task.Delay(100);
                 if (GetWindowRect(existing[i].Handle, out var actual))
                     restoredWindows.Add($"{app.Name}: {actual.Left},{actual.Top} {actual.Right - actual.Left}x{actual.Bottom - actual.Top}");
             }
+
+            outcomes.Add(existing.Count < targetCount
+                ? new AppWindowsNotFound(app)
+                : positioningFailed
+                    ? new AppPositioningFailed(app.Name)
+                    : new AppWindowsRestored(restoredWindows));
+        }
+
+        status(FormatRestoreStatus(profile, outcomes));
+    }
+
+    private static string FormatRestoreStatus(Profile profile, List<AppRestoreOutcome> outcomes)
+    {
+        var launchedWithoutLayout = new List<string>();
+        var windowsNotFound = new List<ExecutableEntry>();
+        var positioningFailed = new List<string>();
+        var restoredWindows = new List<string>();
+
+        foreach (var outcome in outcomes)
+        {
+            switch (outcome)
+            {
+                case AppWindowsNotFound(var app):
+                    windowsNotFound.Add(app);
+                    break;
+                case AppPositioningFailed(var appName):
+                    positioningFailed.Add(appName);
+                    break;
+                case AppLaunchedWithoutLayout(var appName):
+                    launchedWithoutLayout.Add(appName);
+                    break;
+                case AppAlreadyOpenWithoutLayout:
+                    break;
+                case AppWindowsRestored(var summaries):
+                    restoredWindows.AddRange(summaries);
+                    break;
+            }
         }
 
         if (windowsNotFound.Count > 0)
         {
-            var unresolved = profile.Applications.Where(a => windowsNotFound.Contains(a.Name));
-            var targets = unresolved.SelectMany(a => GetExpectedWindowPaths(a.Path)).Distinct(StringComparer.OrdinalIgnoreCase);
-            status($"No matching window for {string.Join(", ", windowsNotFound)}. Expected: {string.Join("; ", targets)}");
+            var targets = windowsNotFound.SelectMany(a => GetExpectedWindowPaths(a.Path)).Distinct(StringComparer.OrdinalIgnoreCase);
+            return $"No matching window for {string.Join(", ", windowsNotFound.Select(a => a.Name))}. Expected: {string.Join("; ", targets)}";
         }
-        else if (positioningFailed.Count > 0)
-            status($"Windows were found, but Windows rejected positioning: {string.Join(", ", positioningFailed.Distinct())}");
-        else if (launchedWithoutLayout.Count > 0)
-            status($"Opened {string.Join(", ", launchedWithoutLayout)}. Save current layout to remember their positions.");
-        else if (profile.Applications.All(a => a.Windows.Count == 0))
-            status("Apps are already open. Arrange them, then save the layout.");
-        else if (restoredWindows.Count > 0)
-            status($"Layout restored — {string.Join("; ", restoredWindows)}");
-        else
-            status("Layout restored");
+        if (positioningFailed.Count > 0)
+            return $"Windows were found, but Windows rejected positioning: {string.Join(", ", positioningFailed.Distinct())}";
+        if (launchedWithoutLayout.Count > 0)
+            return $"Opened {string.Join(", ", launchedWithoutLayout)}. Save current layout to remember their positions.";
+        if (profile.Applications.All(a => a.Windows.Count == 0))
+            return "Apps are already open. Arrange them, then save the layout.";
+        if (restoredWindows.Count > 0)
+            return $"Layout restored — {string.Join("; ", restoredWindows)}";
+        return "Layout restored";
     }
 
     private static string Normalize(string path)
