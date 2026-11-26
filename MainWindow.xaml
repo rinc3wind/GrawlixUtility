@@ -163,6 +163,8 @@
             <Ellipse x:Name="MicStatusDot" Width="12" Height="12" Fill="{StaticResource TextMuted}" HorizontalAlignment="Center" />
             <TextBlock x:Name="MicStatusText" Text="Checking MicToggle status…" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,0" />
             <TextBlock Text="When running, MicToggle stays in the system tray and keeps the global key hook active." Foreground="{StaticResource TextMuted}" FontSize="12" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="400" Margin="0,6,0,18" />
+            <TextBlock Text="Scroll Lock affects these default input devices:" Foreground="{StaticResource TextMuted}" FontSize="12" HorizontalAlignment="Center" Margin="0,0,0,5" />
+            <TextBlock x:Name="MicDeviceNamesText" Text="Checking microphone devices…" FontSize="13" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="500" Margin="0,0,0,18" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
               <Button x:Name="StartMicToggleButton" Content="Start MicToggle" Click="StartMicToggle_Click" Margin="0,0,8,0" />
               <Button x:Name="StopMicToggleButton" Content="Exit MicToggle" Click="StopMicToggle_Click" Margin="0,0,8,0" />

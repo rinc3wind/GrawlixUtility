@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private bool _exitingFromTray;
     private readonly System.Windows.Forms.NotifyIcon _trayIcon;
     private readonly DispatcherTimer _micToggleStatusTimer;
+    private readonly DispatcherTimer _micMuteEnforcementTimer;
 
     public MainWindow()
     {
@@ -49,8 +50,15 @@ public partial class MainWindow : Window
         RefreshList();
         RefreshWebApps();
         _micToggleStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        _micToggleStatusTimer.Tick += (_, _) => RefreshMicToggleStatus();
+        _micToggleStatusTimer.Tick += (_, _) =>
+        {
+            RefreshMicToggleStatus();
+            RefreshMicrophoneDeviceNames();
+        };
         _micToggleStatusTimer.Start();
+        _micMuteEnforcementTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+        _micMuteEnforcementTimer.Tick += (_, _) => EnforceMicrophoneMute();
+        _micMuteEnforcementTimer.Start();
         StartWithWindowsCheckBox.IsChecked = _settings.StartAutomaticallyOnWindowsBoot;
         StartMicrophoneToggleCheckBox.IsChecked = _settings.StartMicrophoneToggleAutomatically;
         MinimizeToTrayCheckBox.IsChecked = _settings.MinimizeToTrayOnExit;
@@ -58,6 +66,7 @@ public partial class MainWindow : Window
         try { SyncWindowsStartupRegistration(_settings.StartAutomaticallyOnWindowsBoot); }
         catch (Exception ex) { StartupSettingsStatus.Text = $"Could not update startup setting: {ex.Message}"; }
         RefreshMicToggleStatus();
+        RefreshMicrophoneDeviceNames();
         if (_settings.StartMicrophoneToggleAutomatically) StartMicToggle();
     }
 
@@ -89,6 +98,8 @@ public partial class MainWindow : Window
         }
 
         _micToggleStatusTimer.Stop();
+        _micMuteEnforcementTimer.Stop();
+        StopMicToggleProcesses();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         var normalBounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
@@ -121,6 +132,23 @@ public partial class MainWindow : Window
 
     private static Process[] GetMicToggleProcesses() => Process.GetProcessesByName("MicToggle");
 
+    private static void StopMicToggleProcesses(Action<Exception>? onError = null)
+    {
+        foreach (var process in GetMicToggleProcesses())
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                    process.WaitForExit(2000);
+                }
+            }
+            catch (Exception ex) { onError?.Invoke(ex); }
+            finally { process.Dispose(); }
+        }
+    }
+
     private void RefreshMicToggleStatus()
     {
         var processes = GetMicToggleProcesses();
@@ -134,6 +162,51 @@ public partial class MainWindow : Window
         MicStatusDetailText.Text = running
             ? "Press Scroll Lock to toggle the microphone, or double-click the MicToggle tray icon."
             : "Start MicToggle to enable the global Scroll Lock microphone toggle.";
+    }
+
+    private void RefreshMicrophoneDeviceNames()
+    {
+        var defaultDevice = AudioDeviceNames.GetDefaultCaptureDevice(AudioDeviceNames.AudioDeviceRole.Multimedia);
+        var communicationsDevice = AudioDeviceNames.GetDefaultCaptureDevice(AudioDeviceNames.AudioDeviceRole.Communications);
+
+        MicDeviceNamesText.Text = (defaultDevice, communicationsDevice) switch
+        {
+            ({ } primary, { } communications) when primary.Id == communications.Id =>
+                $"Default and communications: {primary.Name}",
+            ({ } primary, { } communications) =>
+                $"Default: {primary.Name}\nCommunications: {communications.Name}",
+            ({ } primary, null) => $"Default: {primary.Name}\nCommunications: not set",
+            (null, { } communications) => $"Default: not set\nCommunications: {communications.Name}",
+            _ => "No default microphone detected."
+        };
+    }
+
+    private void EnforceMicrophoneMute()
+    {
+        foreach (var endpoint in AudioDeviceNames.GetDefaultCaptureEndpointVolumes())
+        {
+            try
+            {
+                if (endpoint.Muted)
+                {
+                    if (!_settings.MicrophoneInputLevelsBeforeMute.ContainsKey(endpoint.Id))
+                    {
+                        _settings.MicrophoneInputLevelsBeforeMute[endpoint.Id] = endpoint.Volume;
+                        try { SettingsStore.Save(_settings); } catch { }
+                    }
+
+                    if (endpoint.Volume > 0.0001f)
+                        AudioDeviceNames.SetCaptureEndpointVolume(endpoint.Id, 0f);
+                }
+                else if (_settings.MicrophoneInputLevelsBeforeMute.TryGetValue(endpoint.Id, out var previousVolume))
+                {
+                    AudioDeviceNames.SetCaptureEndpointVolume(endpoint.Id, previousVolume);
+                    _settings.MicrophoneInputLevelsBeforeMute.Remove(endpoint.Id);
+                    try { SettingsStore.Save(_settings); } catch { }
+                }
+            }
+            catch { }
+        }
     }
 
     private void StartMicToggle_Click(object sender, RoutedEventArgs e)
@@ -238,12 +311,7 @@ public partial class MainWindow : Window
 
     private void StopMicToggle_Click(object sender, RoutedEventArgs e)
     {
-        foreach (var process in GetMicToggleProcesses())
-        {
-            try { process.Kill(); }
-            catch (Exception ex) { MicStatusDetailText.Text = $"Could not stop MicToggle: {ex.Message}"; }
-            finally { process.Dispose(); }
-        }
+        StopMicToggleProcesses(ex => MicStatusDetailText.Text = $"Could not stop MicToggle: {ex.Message}");
         RefreshMicToggleStatus();
     }
 

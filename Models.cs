@@ -237,6 +237,7 @@ public sealed class AppSettings
     public bool StartAutomaticallyOnWindowsBoot { get; set; }
     public bool StartMicrophoneToggleAutomatically { get; set; } = true;
     public bool MinimizeToTrayOnExit { get; set; }
+    public Dictionary<string, float> MicrophoneInputLevelsBeforeMute { get; set; } = [];
 }
 
 public static class SettingsStore
